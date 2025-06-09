@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 import statsmodels.api as sm
 from scipy.stats import norm
 from sklearn.metrics import auc
+from statsmodels.stats.anova import anova_lm
 
 #-------------------------------------------------------------------------------
 
@@ -428,6 +429,7 @@ class Regresion:
 class RegresionLineal(Regresion):
   """
   Clase hija que hereda propiedades de la clase Regresion
+  También es útil para realizar Analysis of Variance (ANOVA)
 
   Atributos:
     x: matriz con las variables predictoras en sus columnas
@@ -533,7 +535,51 @@ class RegresionLineal(Regresion):
     #Internamente se realiza el producto punto de los p+1 coeficientes de regresión con los p+1 coeficientes de x0
     return self.results.get_prediction(x0).summary_frame(alpha)
 
-  def R2(self, ajustado: bool = False):
+  def ANOVA(self, alpha=0.05):
+    """
+    Método para realizar el test ANOVA
+    Nuestro modelo es Y_ij = mu_i + epsilon_ij (mu_i factor del grupo i)
+    con epsilon_ij normal con media 0 y desvío constante
+    Además suponemos independencia de las observaciones entre y dentro de los grupos
+    H0: mu_i = mu_j para todo i,j
+    H1: mu_i distinto de mu_j para i distinto de j
+
+    Si tenemos I grupos, traducimos esto a un modelo de Regresión Lineal de la forma 
+    Y = beta0 + beta1 X1 + ... + betaI-1 XI-1 + epsilon
+    Notemos que mu_i = beta0 + betai para i entre 1 e I-1
+    A partir del modelo de Regresión Lineal las hipótesis son
+    H0: betas = 0
+    H1: algún beta distinto de 0
+
+    Considerando el modelo bajo H0, dado por Y = beta0 + epsilon
+    realizo un Test ANOVA para determinar con cual modelo quedarme
+    Ahora las hipótesis son
+    H0: modelo reducido
+    H1: modelo completo
+
+    El modelo reducido equivale a afirmar que las medias son iguales
+    El modelo completo equivale a afirmar que las medias son distintas
+    Decidiremos sobre el modelo en base al p-valor obtenido del test ANOVA
+
+    Se recuerda que es necesario corroborar los supuestos del modelo
+    """
+    #Corroboremos que el modelo fue ajustado
+    if self.results is None:
+      raise ValueError("El modelo aún no ha sido ajustado. Ejecute el método 'ajustar()' primero.")
+
+    #Construyamos la matriz de diseño del modelo reducido bajo H0
+    X_red = np.ones(len(self.y))
+    #Ahora ajustemos el modelo reducido
+    modelo = sm.OLS(self.y, X_red)
+    modelo_reducido = modelo.fit()
+
+    #Cambiemos el nombre de un atributo de instancia de forma temporal
+    modelo_completo = self.results
+
+    #Ahora apliquemos el test ANOVA
+    return anova_lm(modelo_reducido, modelo_completo)
+
+  def R2(self, ajustado: bool =False):
     """
     Método para calcular el R^{2} y el R^{2} ajustado del modelo
 
@@ -699,7 +745,11 @@ class RegresionLogistica(Regresion):
     #Realizamos la predicción y la retornamos
     return self.results.predict(x0)[0]
 
+<<<<<<< HEAD
   def matriz_confusion(self, p: float = 0.5, medidas: bool = False, imprimir_tabla: bool = False):
+=======
+  def matriz_confusion(self, p=0.5, medidas=False, imprimir_tabla=True):
+>>>>>>> nueva_rama
     """
     Método para construir la matriz de confusión y así analizar la bondad del modelo
     Estamos suponiendo que el modelo se ajustó con datos_train y ahora utilizaremos
@@ -744,7 +794,11 @@ class RegresionLogistica(Regresion):
       especificidad = d / (b+d)
       return [float(sensibilidad), float(especificidad)]
 
+<<<<<<< HEAD
   def corte_optimo(self, n: int = 100, graficos: bool = False):
+=======
+  def corte_optimo(self, n=100, graficos=True):
+>>>>>>> nueva_rama
     """
     Método para calcular el punto de corte óptimo con el índice de Jouden, así como
     graficar curvas y medidas que lo confirmen
