@@ -7,6 +7,19 @@ Original file is located at
     https://colab.research.google.com/drive/1O8h-3E-3JvoXJxWDnJzTbFFN4193yzqR
 """
 
+"""
+Este módulo proporciona clases para realizar análisis descriptivo y visualización
+de datos, generar datos con cierta distribución, y trabajar con modelos de regresión
+lineal y logística
+
+Clases:
+    AnalisisDescriptivo
+    GeneradoraDeDatos
+    Regresion
+    RegresionLineal
+    RegresionLogistica
+"""
+
 #Importemos las librerías
 import numpy as np
 import pandas as pd
@@ -15,6 +28,7 @@ import matplotlib.pyplot as plt
 import statsmodels.api as sm
 from scipy.stats import norm
 from sklearn.metrics import auc
+from statsmodels.stats.anova import anova_lm
 
 #-------------------------------------------------------------------------------
 
@@ -414,6 +428,7 @@ class Regresion:
 class RegresionLineal(Regresion):
   """
   Clase hija que hereda propiedades de la clase Regresion
+  También es útil para realizar Analysis of Variance (ANOVA)
 
   Atributos:
     x: matriz con las variables predictoras en sus columnas
@@ -518,6 +533,50 @@ class RegresionLineal(Regresion):
     #y el intervalo de predicción
     #Internamente se realiza el producto punto de los p+1 coeficientes de regresión con los p+1 coeficientes de x0
     return self.results.get_prediction(x0).summary_frame(alpha)
+
+  def ANOVA(self, alpha=0.05):
+    """
+    Método para realizar el test ANOVA
+    Nuestro modelo es Y_ij = mu_i + epsilon_ij (mu_i factor del grupo i)
+    con epsilon_ij normal con media 0 y desvío constante
+    Además suponemos independencia de las observaciones entre y dentro de los grupos
+    H0: mu_i = mu_j para todo i,j
+    H1: mu_i distinto de mu_j para i distinto de j
+
+    Si tenemos I grupos, traducimos esto a un modelo de Regresión Lineal de la forma 
+    Y = beta0 + beta1 X1 + ... + betaI-1 XI-1 + epsilon
+    Notemos que mu_i = beta0 + betai para i entre 1 e I-1
+    A partir del modelo de Regresión Lineal las hipótesis son
+    H0: betas = 0
+    H1: algún beta distinto de 0
+
+    Considerando el modelo bajo H0, dado por Y = beta0 + epsilon
+    realizo un Test ANOVA para determinar con cual modelo quedarme
+    Ahora las hipótesis son
+    H0: modelo reducido
+    H1: modelo completo
+
+    El modelo reducido equivale a afirmar que las medias son iguales
+    El modelo completo equivale a afirmar que las medias son distintas
+    Decidiremos sobre el modelo en base al p-valor obtenido del test ANOVA
+
+    Se recuerda que es necesario corroborar los supuestos del modelo
+    """
+    #Corroboremos que el modelo fue ajustado
+    if self.results is None:
+      raise ValueError("El modelo aún no ha sido ajustado. Ejecute el método 'ajustar()' primero.")
+
+    #Construyamos la matriz de diseño del modelo reducido bajo H0
+    X_red = np.ones(len(self.y))
+    #Ahora ajustemos el modelo reducido
+    modelo = sm.OLS(self.y, X_red)
+    modelo_reducido = modelo.fit()
+
+    #Cambiemos el nombre de un atributo de instancia de forma temporal
+    modelo_completo = self.results
+
+    #Ahora apliquemos el test ANOVA
+    return anova_lm(modelo_reducido, modelo_completo)
 
   def R2(self, ajustado=False):
     """
@@ -648,7 +707,7 @@ class RegresionLogistica(Regresion):
 
     #Agreguemos constantes a las matrices de diseño de datos_test, actualizando sus valores
     #A la de datos_train no es necesario pues lo hace la clase padre
-    self.X_test = sm.add_constant(X_test)
+    self.X_test = sm.add_constant(self.X_test)
 
     #Mostremos un resumen de los tamaños
     print('Tamaños muestrales:')
@@ -685,7 +744,7 @@ class RegresionLogistica(Regresion):
     #Realizamos la predicción y la retornamos
     return self.results.predict(x0)[0]
 
-  def matriz_confusion(self, p=0.5, medidas=False, imprimir_tabla=False):
+  def matriz_confusion(self, p=0.5, medidas=False, imprimir_tabla=True):
     """
     Método para construir la matriz de confusión y así analizar la bondad del modelo
     Estamos suponiendo que el modelo se ajustó con datos_train y ahora utilizaremos
@@ -730,7 +789,7 @@ class RegresionLogistica(Regresion):
       especificidad = d / (b+d)
       return [float(sensibilidad), float(especificidad)]
 
-  def corte_optimo(self, n=100, graficos=False):
+  def corte_optimo(self, n=100, graficos=True):
     """
     Método para calcular el punto de corte óptimo con el índice de Jouden, así como
     graficar curvas y medidas que lo confirmen
