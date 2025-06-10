@@ -813,8 +813,8 @@ class RegresionLogistica(Regresion):
 
     #Si pedimos que imprima la tabla, lo hacemos, junto al error de mala clasificación
     if imprimir_tabla == True:
-      print(tabla)
       print(f'Error de mala clasificación: {(b+c) / len(self.y_test)}')
+      return tabla
     #Si pedimos que retorne las medidas de sensibilidad y especificidad, lo hacemos
     if medidas == True:
       sensibilidad = a / (a+c)
