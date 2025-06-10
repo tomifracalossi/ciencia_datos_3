@@ -26,8 +26,9 @@ import pandas as pd
 import random
 import matplotlib.pyplot as plt
 import statsmodels.api as sm
-from scipy.stats import norm
+from scipy.stats import norm, f
 from sklearn.metrics import auc
+from statsmodels.stats.anova import anova_lm
 
 #-------------------------------------------------------------------------------
 
@@ -83,7 +84,7 @@ class AnalisisDescriptivo:
     plt.xlabel('Datos')
     plt.show()
 
-  def __genera_histograma(self, h: float | int) -> np.ndarray:
+  def __genera_histograma(self, h: float) -> np.ndarray:
     """
     Método privado que genera el histograma de los datos con bandwidth h
 
@@ -108,7 +109,7 @@ class AnalisisDescriptivo:
     #Retorno los intervalos y las alturas
     return bins, alturas
 
-  def estimacion_histograma(self, h: float | int, x: np.ndarray, retornar: bool = True, graficar: bool = True) -> np.ndarray:
+  def estimacion_histograma(self, h: float, x: np.ndarray, retornar=True, graficar=True) -> np.ndarray:
     """
     Método que estima la densidad de los datos sobre una grilla x con un bandwidth h
 
@@ -149,7 +150,7 @@ class AnalisisDescriptivo:
   def __kernel_triangular(self, x: np.ndarray) -> np.ndarray:
     return (1+x)*((x > -1) & (x < 0)) + (1-x)*((x > 0) & (x < 1))
 
-  def estimacion_kernel(self, h: float | int, x: np.ndarray, kernel: str = 'gaussiano', retornar: bool = True, graficar: bool = True) -> np.ndarray:
+  def estimacion_kernel(self, h: float, x: np.ndarray, kernel='gaussiano', retornar=True, graficar=True) -> np.ndarray:
     """
     Estima la densidad de los datos usando kernels: guassiano, uniforme, triangular y cuadrático
 
@@ -192,7 +193,7 @@ class AnalisisDescriptivo:
       plt.title(f'Estimación con kernel {kernel}')
       plt.show()
 
-  def qqplot_estandar(self, datos: np.ndarray | None = None):
+  def qqplot_estandar(self, datos=None):
     """
     Método para graficar el QQ plot normal estándar de una muestra de datos
 
@@ -238,7 +239,7 @@ class GeneradoraDeDatos:
     """
     self.n = n
 
-  def muestra_normal(self, mu: int | float = 0, sigma: int | float = 1) -> np.ndarray:
+  def muestra_normal(self, mu=0, sigma=1) -> np.ndarray:
     """
     Método para generar datos con distribución normal
     Por defecto la distribución es normal estándar, aunque puede especificarse
@@ -250,7 +251,7 @@ class GeneradoraDeDatos:
     """
     return np.random.normal(mu, sigma, self.n)
 
-  def muestra_uniforme(self, a: int | float = 0, b: int | float =1) -> np.ndarray:
+  def muestra_uniforme(self, a=0, b=1) -> np.ndarray:
     """
     Método para generar datos con distribución uniforme
     Por defecto el intervalo es [0,1], aunque puede especificarse el intervalo [a,b]
@@ -271,7 +272,7 @@ class GeneradoraDeDatos:
     """
     return np.random.standard_t(df, self.n)
 
-  def muestra_exponencial(self, beta: int | float) -> np.ndarray:
+  def muestra_exponencial(self, beta) -> np.ndarray:
     """
     Método para generar datos con distribución exponencial
 
@@ -337,8 +338,7 @@ class Regresion:
 
     #Definamos la matriz x sin la columna de 1 (esto será útil cuando trabajemos
     #con regresión lineal simple)
-    #Lo definiremos como un atributo protegido
-    self._x = X.copy()
+    self.x = X.copy()
     #Definamos la matriz de diseño X añadiendo la columna de 1
     #El parámetro has_constant='add' añade la constante de manera forzosa
     self.X = sm.add_constant(X, has_constant='add')
@@ -367,7 +367,7 @@ class Regresion:
     #Retornemos los SE estimados
     return self.results.bse
 
-  def IC_parametros(self, alpha: float = 0.05):
+  def IC_parametros(self, alpha=0.05):
     """
     Método para retornar intervalos de (1-alpha)% de confianza para los parámetros
     o coeficientes de regresión estimados del modelo
@@ -428,6 +428,7 @@ class Regresion:
 class RegresionLineal(Regresion):
   """
   Clase hija que hereda propiedades de la clase Regresion
+  También es útil para realizar Analysis of Variance (ANOVA)
 
   Atributos:
     x: matriz con las variables predictoras en sus columnas
@@ -442,7 +443,7 @@ class RegresionLineal(Regresion):
     """
 
     #Hacemos que RegresionLineal herede los atributos de instancia de la clase Regresion,
-    #es decir: self._x, self.X, self.y, self.results.
+    #es decir: self.x, self.X, self.y, self.results.
     super().__init__(X, y)
 
   def ajustar(self):
@@ -504,7 +505,7 @@ class RegresionLineal(Regresion):
     plt.title('QQ plot de los residuos')
     plt.show()
 
-  def prediccion(self, x0: list, alpha: float = 0.05):
+  def prediccion(self, x0: list, alpha=0.05):
     """
     Método para retornar la predicción de la variable respuesta Y para una lista x0
     de valores para las variables predictoras (en orden), así como también el intervalo
@@ -533,7 +534,83 @@ class RegresionLineal(Regresion):
     #Internamente se realiza el producto punto de los p+1 coeficientes de regresión con los p+1 coeficientes de x0
     return self.results.get_prediction(x0).summary_frame(alpha)
 
-  def R2(self, ajustado: bool = False):
+  def ANOVA(self, manual=False, alpha=0.05):
+    """
+    Método para realizar el test ANOVA
+    Nuestro modelo es Y_ij = mu_i + epsilon_ij (mu_i factor del grupo i)
+    con epsilon_ij normal con media 0 y desvío constante
+    Además suponemos independencia de las observaciones entre y dentro de los grupos
+    H0: mu_i = mu_j para todo i,j
+    H1: mu_i distinto de mu_j para i distinto de j
+
+    Si tenemos I grupos, traducimos esto a un modelo de Regresión Lineal de la forma
+    Y = beta0 + beta1 X1 + ... + betaI-1 XI-1 + epsilon
+    Notemos que mu_i = beta0 + betai para i entre 1 e I-1
+    A partir del modelo de Regresión Lineal las hipótesis son
+    H0: betas = 0
+    H1: algún beta distinto de 0
+
+    Considerando el modelo bajo H0, dado por Y = beta0 + epsilon
+    realizo un Test ANOVA para determinar con cual modelo quedarme
+    Ahora las hipótesis son
+    H0: modelo reducido
+    H1: modelo completo
+
+    El modelo reducido equivale a afirmar que las medias son iguales
+    El modelo completo equivale a afirmar que las medias son distintas
+    Decidiremos sobre el modelo en base al p-valor obtenido del test ANOVA
+
+    Se recuerda que es necesario corroborar los supuestos del modelo
+    """
+    #Corroboremos que el modelo fue ajustado
+    if self.results is None:
+      raise ValueError("El modelo aún no ha sido ajustado. Ejecute el método 'ajustar()' primero.")
+
+    #Construyamos la matriz de diseño del modelo reducido bajo H0
+    X_red = np.ones(len(self.y))
+    #Ahora ajustemos el modelo reducido
+    modelo = sm.OLS(self.y, X_red)
+    modelo_reducido = modelo.fit()
+
+    #Cambiemos el nombre de un atributo de instancia de forma temporal
+    modelo_completo = self.results
+
+    #Cuentas a mano
+    if manual == True:
+      #Suma de los residuos al cuadrado
+      RSS_M = np.sum(modelo_completo.resid**2)
+      RSS_m = np.sum(modelo_reducido.resid**2)
+      #Calculemos la cantidad de datos
+      n = len(self.y)
+      #Calculo los grados de libertad de cada modelo en función de la cantidad de parámetros
+      #beta que tiene cada uno
+      gl_M = n-self.X.shape[1] #beta0, beta1, ..., betaI-1
+      gl_m = n-1 #beta0
+      #Calculo el numerador y el denominador del F observado, o sea el S_F^{2} y el S_p^{2}
+      #de nuestros datos
+      numerador = (RSS_m - RSS_M) / (gl_m - gl_M) #S_F^2
+      denominador = RSS_M / gl_M #S_p^2
+      #Calculo el F observado, o sea S_F^2 / S_p^2
+      F_obs = numerador / denominador
+      #Imprimo el numerador, el denominador y el F_obs
+      print(f'Numerador S_F^2 = {numerador}')
+      print(f'Denominador S_p^2 = {denominador}')
+      print(f'F observado en nuestros datos, o sea S_F^2 / S_p^2 = {F_obs}')
+      #Denotaremos con dn los grados de libertad del numerador
+      dn = gl_m - gl_M
+      #Denotaremos con dd los grados de libertad del denominador
+      dd = gl_M
+      #Calculemos el p-valor como la probabilidad de hallar un cociente mayor o igual
+      #al F_observado
+      p_value = 1 - f.cdf(F_obs, dn, dd)
+      #Mostremos dicho p-valor
+      print(f'El p-valor es {p_value}')
+
+    #Cuentas utilizando de la función anova_lm de Scipy:
+    if manual == False:
+      return anova_lm(modelo_reducido, modelo_completo)
+
+  def R2(self, ajustado=False):
     """
     Método para calcular el R^{2} y el R^{2} ajustado del modelo
 
@@ -561,18 +638,18 @@ class RegresionLineal(Regresion):
       raise ValueError("El modelo aún no ha sido ajustado. Ejecute el método 'ajustar()' primero.")
 
     #Si tenemos una única variable predictora
-    if self._x.shape[1] == 1:
+    if self.x.shape[1] == 1:
       #Calculamos el coeficiente de correlación y lo retornamos
       #Recordemos que x es una matriz, pues al ajustar lo transformamos en DataFrame
-      return np.corrcoef(self._x.iloc[:,0], self.y)[0,1]
+      return np.corrcoef(self.x.iloc[:,0], self.y)[0,1]
     #Si tengo más de una predictora calculo el coeficiente de correlación para cada una contra la respuesta
-    elif self._x.shape[1] > 1:
+    elif self.x.shape[1] > 1:
       #Defino un vector vacío
-      vector = np.zeros(self._x.shape[1])
+      vector = np.zeros(self.x.shape[1])
       #Recorro las predictoras
-      for i in range(self._x.shape[1]):
+      for i in range(self.x.shape[1]):
         #Calculo el coeficiente y lo almaceno en el vector
-        vector[i] = np.corrcoef(self._x.iloc[:,i], self.y)[0,1]
+        vector[i] = np.corrcoef(self.x.iloc[:,i], self.y)[0,1]
       #Retorno el vector con los coeficientes
       print('Correlación entre cada predictora y la respuesta:')
       return vector
@@ -590,7 +667,7 @@ class RegresionLineal(Regresion):
       raise ValueError("El modelo aún no ha sido ajustado. Ejecute el método 'ajustar()' primero.")
 
     #Si tenemos una única variable predictora
-    if self._x.shape[1] == 1:
+    if self.x.shape[1] == 1:
 
       #Calculemos las estimaciones óptimas de los coeficientes de regresión
       b0, b1 = self.results.params
@@ -598,12 +675,12 @@ class RegresionLineal(Regresion):
       print(f'La ecuación de la recta es y = {b0} + {b1} * x1')
 
       #Definamos una grilla de valores x para graficar
-      x = np.linspace(np.min(self._x), np.max(self._x), 1000)
+      x = np.linspace(np.min(self.x), np.max(self.x), 1000)
       #Calculamos las imágenes de esta recta en la grilla de valores x
       y = b0 + b1 * x
 
       #Grafiquemos
-      plt.scatter(self._x, self.y, color='b', label='Datos') #Gráfico de dispersión de X e Y
+      plt.scatter(self.x, self.y, color='b', label='Datos') #Gráfico de dispersión de X e Y
       plt.plot(x, y, color='r', label='Recta de regresión estimada') #Recta estimada de regresión
       plt.xlabel('X')
       plt.ylabel('Y')
@@ -612,15 +689,15 @@ class RegresionLineal(Regresion):
       plt.grid(True)
       plt.show()
 
-    #Si tenemos varias predictoras (más de una columna)
-    elif self._x.shape[1] > 1:
+    #Si tenemos varias predictoras
+    elif self.x.shape[1] > 1:
 
       #Calculamos el número de predictoras
-      p = self._x.shape[1]
+      p = self.x.shape[1]
 
       #Recorremos cada variable predictora y hacemos el scatter plot contra la respuesta
       for i in range(p):
-            plt.scatter(self._x.iloc[:, i], self.y, color='b', label=f'Predictora {i+1}')
+            plt.scatter(self.x.iloc[:, i], self.y, color='b', label=f'Predictora {i+1}')
             plt.xlabel(f'Predictora {i+1}')
             plt.ylabel('Respuesta')
             plt.title(f'Scatter plot')
@@ -699,7 +776,7 @@ class RegresionLogistica(Regresion):
     #Realizamos la predicción y la retornamos
     return self.results.predict(x0)[0]
 
-  def matriz_confusion(self, p: float = 0.5, medidas: bool = False, imprimir_tabla: bool = False):
+  def matriz_confusion(self, p=0.5, medidas=False, imprimir_tabla=True):
     """
     Método para construir la matriz de confusión y así analizar la bondad del modelo
     Estamos suponiendo que el modelo se ajustó con datos_train y ahora utilizaremos
@@ -744,7 +821,7 @@ class RegresionLogistica(Regresion):
       especificidad = d / (b+d)
       return [float(sensibilidad), float(especificidad)]
 
-  def corte_optimo(self, n: int = 100, graficos: bool = False):
+  def corte_optimo(self, n=100, graficos=True):
     """
     Método para calcular el punto de corte óptimo con el índice de Jouden, así como
     graficar curvas y medidas que lo confirmen
@@ -835,14 +912,14 @@ class RegresionLogistica(Regresion):
 
     #Corroboremos que tenemos una única variable predictora
     #Recordemos que, según la clase padre, self.x almacena la matriz de datos_train sin la columna constante
-    if self._x.shape[1] == 1:
+    if self.x.shape[1] == 1:
       #En cuyo caso calculamos los coeficientes de regresión del log-odds del modelo con datos_train
       b0, b1 = self.results.params
       #Creamos un rango de valores para la predictora para graficar la curva sigmoide
       #Tomo el mínimo y el máximo con min() y max() y luego, como x es matriz, le tomo el elemento
       #correspondiente con iloc[0]
-      a = self._x.min().iloc[0]
-      b = self._x.max().iloc[0]
+      a = self.x.min().iloc[0]
+      b = self.x.max().iloc[0]
       x_rango = np.linspace(a, b, 1000)
       #Defino en una variable auxiliar la recta
       aux = b0 + b1 * x_rango
@@ -852,7 +929,7 @@ class RegresionLogistica(Regresion):
       plt.figure(figsize=(10, 6))
       plt.scatter(self.X.iloc[:, 1], self.y, color='blue', label='Datos de Entrenamiento', alpha=0.6)
       plt.plot(x_rango, probabilidades, color='red', label='Curva Sigmoide Estimada')
-      plt.xlabel(self._x.columns[0])
+      plt.xlabel(self.x.columns[0])
       plt.ylabel('Probabilidad de Y = 1')
       plt.title('Regresión Logística con Curva Sigmoide')
       plt.legend()
