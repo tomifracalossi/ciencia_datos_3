@@ -468,7 +468,7 @@ class RegresionLineal(Regresion):
       raise ValueError("El modelo aún no ha sido ajustado. Ejecute el método 'ajustar()' primero.")
 
     #Calculemos la cantidad cant de predictoras (cantidad de columnas de x)
-    p = self.X.shape[1]
+    p = self.x.shape[1]
     #Calculamos la cantidad de observaciones (longitud de la variable respuesta y)
     n = len(self.y)
     #Calculamos la media y el desvío de los errores (este último tiene n-p-1 grados de libertad
